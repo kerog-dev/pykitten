@@ -114,16 +114,11 @@ def start(render, data_dir: Path):
             return
 
         await ws.accept()
-        await ws.send_text(
-            " ".join(
-                [
-                    "timeupdate",
-                    "1" if room.time.paused else "0",
-                    str(room.time.base_time),
-                    str(room.time.started_at),
-                ]
-            )
-        )
+
+        async def send_state(ws: WebSocket):
+            await ws.send_text(f"{room.time.paused} {room.time.time}")
+
+        await send_state(ws)
 
         room_ws: List[WebSocket] | None = websockets.get(room_name)
         if room_ws is None:
@@ -136,24 +131,13 @@ def start(render, data_dir: Path):
             while True:
                 msg = await ws.receive_text()
                 parts = msg.split(" ")
-                cmd = parts[0]
-                args = parts[1:]
-                if cmd == "timeupdate":
-                    room.time.paused = args[0] == "1"
-                    room.time.base_time = float(args[1])
-                    room.time.started_at = time()
-                    for update_ws in room_ws:
-                        await update_ws.send_text(
-                            " ".join(
-                                [
-                                    "timeupdate",
-                                    "1" if room.time.paused else "0",
-                                    str(room.time.base_time),
-                                    str(room.time.started_at),
-                                    "1" if update_ws is ws else "0",
-                                ]
-                            )
-                        )
+                room.time.base_time = float(parts[0])
+                room.time.paused = parts[1] == "1"
+                room.time.started_at = time()
+                for update_ws in room_ws:
+                    if update_ws is ws:
+                        continue
+                    await send_state(update_ws)
         except WebSocketDisconnect:
             pass
         finally:
