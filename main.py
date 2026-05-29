@@ -14,6 +14,10 @@ BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 TEMPLATE_DIR = BASE_DIR / "templates"
 APPS_DIR = BASE_DIR / "apps"
+DATA_DIR = BASE_DIR / "data"
+
+if not DATA_DIR.exists():
+    DATA_DIR.mkdir()
 
 app_mounts = []
 app_jinjas: Dict[str, Environment] = {}
@@ -36,13 +40,17 @@ for appdir in APPS_DIR.iterdir():
         continue
     module = import_module(f"apps.{appdir.name}.routes")
 
+    app_data = DATA_DIR / appdir.name
+    if not app_data.exists():
+        app_data.mkdir()
+
     templates_path = appdir / "templates"
     if templates_path.exists():
         app_jinjas[appdir.name] = Environment(
             autoescape=True, loader=FileSystemLoader(str(templates_path))
         )
 
-    loaded_app = module.start(make_render(appdir.name))
+    loaded_app = module.start(make_render(appdir.name), app_data)
 
     app_mount_routes = list(loaded_app.get("routes"))
 
@@ -71,9 +79,7 @@ def render(template_name, **context):
     return HTMLResponse(template.render(**context))
 
 
-def app_render(app_name: str, template_name: str, context: dict = None):
-    context = context or {}
-
+def app_render(app_name: str, template_name: str, context: dict = {}):
     jinja = app_jinjas.get(app_name)
     if not jinja:
         return HTMLResponse(

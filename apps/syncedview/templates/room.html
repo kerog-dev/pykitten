@@ -2,8 +2,14 @@
 <html>
     <head>
         <title>{{ room.name }} - syncedview - pykitten</title>
+        <script type="roomdata">
+            {{ room_dict | tojson }}
+        </script>
+        <script type="module" src="../main.js"></script>
     </head>
     <body>
-        {{ room.name }} {{ room.watching.type }} {{ room.watching.id }}
+        welcome to {{ room.name }}
+        <div id="video-container"></div>
+        <pre id="status"></pre>
     </body>
 </html>
