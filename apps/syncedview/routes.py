@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
@@ -67,12 +68,36 @@ def start(render, data_dir: Path):
         return HTMLResponse(html)
 
     async def create_yt_room(req: Request):
-        room_name = req.query_params.get("name", None)
-        video_id = req.query_params.get("videoId", None)
+        room_name = req.query_params.get("name")
+        video_id = req.query_params.get("videoId")
+        width = req.query_params.get("quality")
         if room_name is None:
             return JSONResponse({"ok": False, "err": "no room name provided"})
         if video_id is None:
             return JSONResponse({"ok": False, "err": "no video id provided"})
+        if width is None:
+            return JSONResponse({"ok": False, "err": "no max quality provided"})
+
+        async def download():
+            await asyncio.create_subprocess_exec(
+                "yt-dlp",
+                "-f",
+                f"b[height<={width}]",
+                "-o",
+                str(data_dir / video_id),
+                "--",
+                video_id,
+            )
+
+        def is_already_downloaded():
+            for file in data_dir.iterdir():
+                if file.name.startswith(video_id):
+                    return True
+            return False
+
+        if not is_already_downloaded():
+            asyncio.create_task(download())
+
         room = Room(
             name=room_name,
             watching=YoutubeWatching(id=video_id),
@@ -82,7 +107,7 @@ def start(render, data_dir: Path):
         return JSONResponse({"ok": True})
 
     async def get_room_video_path(req: Request):
-        room_name = req.query_params.get("name", None)
+        room_name = req.query_params.get("name")
         if room_name is None:
             return JSONResponse({"ok": False, "err": "room name not provided"})
         room = None
