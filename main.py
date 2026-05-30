@@ -35,24 +35,25 @@ for appdir in APPS_DIR.iterdir():
     if not appdir.is_dir() or appdir.name.startswith("_"):
         continue
 
+    app_mount_routes = []
+
     routes_file = appdir / "routes.py"
-    if not routes_file.exists():
-        continue
-    module = import_module(f"apps.{appdir.name}.routes")
+    if routes_file.exists():
+        module = import_module(f"apps.{appdir.name}.routes")
 
-    app_data = DATA_DIR / appdir.name
-    if not app_data.exists():
-        app_data.mkdir()
+        app_data = DATA_DIR / appdir.name
+        if not app_data.exists():
+            app_data.mkdir()
 
-    templates_path = appdir / "templates"
-    if templates_path.exists():
-        app_jinjas[appdir.name] = Environment(
-            autoescape=True, loader=FileSystemLoader(str(templates_path))
-        )
+        templates_path = appdir / "templates"
+        if templates_path.exists():
+            app_jinjas[appdir.name] = Environment(
+                autoescape=True, loader=FileSystemLoader(str(templates_path))
+            )
 
-    loaded_app = module.start(make_render(appdir.name), app_data)
+        loaded_app = module.start(make_render(appdir.name), app_data)
 
-    app_mount_routes = list(loaded_app.get("routes"))
+        app_mount_routes.extend(list(loaded_app.get("routes")))
 
     public_dir = appdir / "public"
     if public_dir.exists() and public_dir.is_dir():
