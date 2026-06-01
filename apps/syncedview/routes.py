@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import time
 from typing import Dict, List, Literal
+import json
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
@@ -17,10 +18,13 @@ class YoutubeWatching:
     type: Literal["youtube"] = "youtube"
 
 
+type RoomWatching = YoutubeWatching
+
+
 @dataclass
 class Room:
     name: str
-    watching: YoutubeWatching
+    watching: RoomWatching
     time: TimeState
 
 
@@ -44,6 +48,44 @@ rooms: List[Room] = []
 websockets: Dict[str, List[WebSocket]] = {}
 
 
+def start_download(data_dir: Path, video_id: str, quality: str):
+    async def task():
+        await asyncio.create_subprocess_exec(
+            "yt-dlp",
+            "-f",
+            f"b[height<={quality}]",
+            "-o",
+            str(data_dir / video_id),
+            "--",
+            video_id,
+        )
+
+    def is_already_downloaded():
+        for file in data_dir.iterdir():
+            if file.name.startswith(video_id):
+                return True
+        return False
+
+    if not is_already_downloaded():
+        asyncio.create_task(task())
+
+
+def room_watching_to_dict(watching: RoomWatching) -> Dict[str, any]:
+    dict: Dict[str, any] = {"type": watching.type}
+    if watching.type == "youtube":
+        dict["videoId"] = watching.id
+    return dict
+
+
+def serialize_room_state(room: Room) -> str:
+    dict = {
+        "time": room.time.time,
+        "paused": room.time.paused,
+        "watching": room_watching_to_dict(room.watching),
+    }
+    return json.dumps(dict)
+
+
 def start(render, data_dir: Path):
     async def get_room(req: Request):
         room_name = req.path_params.get("name")
@@ -53,9 +95,10 @@ def start(render, data_dir: Path):
                 room = room2
         if room is None:
             return HTMLResponse(f"error!\nunknown room: {room_name}")
-        room_dict = {"name": room.name, "watching_type": room.watching.type}
-        if room.watching.type == "youtube":
-            room_dict["watching_id"] = room.watching.id
+        room_dict = {
+            "name": room.name,
+            "watching": room_watching_to_dict(room.watching),
+        }
         return render("room.html", room=room, room_dict=room_dict)
 
     async def list_rooms(req):
@@ -70,33 +113,15 @@ def start(render, data_dir: Path):
     async def create_yt_room(req: Request):
         room_name = req.query_params.get("name")
         video_id = req.query_params.get("videoId")
-        width = req.query_params.get("quality")
+        quality = req.query_params.get("quality")
         if room_name is None:
             return JSONResponse({"ok": False, "err": "no room name provided"})
         if video_id is None:
             return JSONResponse({"ok": False, "err": "no video id provided"})
-        if width is None:
+        if quality is None:
             return JSONResponse({"ok": False, "err": "no max quality provided"})
 
-        async def download():
-            await asyncio.create_subprocess_exec(
-                "yt-dlp",
-                "-f",
-                f"b[height<={width}]",
-                "-o",
-                str(data_dir / video_id),
-                "--",
-                video_id,
-            )
-
-        def is_already_downloaded():
-            for file in data_dir.iterdir():
-                if file.name.startswith(video_id):
-                    return True
-            return False
-
-        if not is_already_downloaded():
-            asyncio.create_task(download())
+        start_download(data_dir, video_id, quality)
 
         room = Room(
             name=room_name,
@@ -122,6 +147,7 @@ def start(render, data_dir: Path):
                     return JSONResponse(
                         {"ok": True, "path": f"/syncedview/static_yt/{file.name}"}
                     )
+            return JSONResponse({"ok": False, "err": "no file for this youtube id"})
         return JSONResponse({"ok": False, "err": "failed"})
 
     async def room_ws(ws: WebSocket):
@@ -141,7 +167,7 @@ def start(render, data_dir: Path):
         await ws.accept()
 
         async def send_state(ws: WebSocket):
-            await ws.send_text(f"{room.time.paused} {room.time.time}")
+            await ws.send_text(f"state {serialize_room_state(room)}")
 
         await send_state(ws)
 
@@ -156,11 +182,18 @@ def start(render, data_dir: Path):
             while True:
                 msg = await ws.receive_text()
                 parts = msg.split(" ")
-                room.time.base_time = float(parts[0])
-                room.time.paused = parts[1] == "1"
-                room.time.started_at = time()
+                if parts[0] == "stateupdate":
+                    room.time.base_time = float(parts[1])
+                    room.time.paused = parts[2] == "1"
+                    room.time.started_at = time()
+                elif parts[0] == "switchvideo":
+                    room.watching = YoutubeWatching(id=parts[1])
+                    room.time.base_time = 0
+                    room.time.paused = True
+                    room.time.started_at = time()
+                    start_download(data_dir, room.watching.id, parts[2])
                 for update_ws in room_ws:
-                    if update_ws is ws:
+                    if update_ws is ws and parts[0] == "stateupdate":
                         continue
                     await send_state(update_ws)
         except WebSocketDisconnect:

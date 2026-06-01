@@ -16,13 +16,14 @@
         create a youtube room
         <form hx-get="./create_yt_room" hx-swap="none">
             <label for="name">name</label>
-            <input type="text" name="name" />
-            <label for="videoId"
-                >video id, example: in the url
-                https://www.youtube.com/watch?v=dQw4w9WgXcQ the id is
-                dQw4w9WgXcQ</label
+            <input type="text" name="name" /><br />
+            <label
+                for="videoId"
+                title="example: in the url https://www.youtube.com/watch?v=dQw4w9WgXcQ
+the id is dQw4w9WgXcQ"
+                >video id</label
             >
-            <input type="text" name="videoId" />
+            <input type="text" name="videoId" /><br />
             <label>quality no greater than</label>
             <select name="quality">
                 <option value="2160">2160p (4K)</option>
@@ -32,8 +33,8 @@
                 <option value="480">480p</option>
                 <option value="360" selected>360p</option>
                 <option value="240">240p</option>
-                <option value="144">144p</option>
-            </select>
+                <option value="144">144p</option></select
+            ><br />
             <input type="submit" value="Create" />
         </form>
     </body>

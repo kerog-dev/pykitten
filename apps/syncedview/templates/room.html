@@ -1,15 +1,32 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-    <head>
-        <title>{{ room.name }} - syncedview - pykitten</title>
-        <script type="roomdata">
-            {{ room_dict | tojson }}
-        </script>
-        <script type="module" src="../main.js"></script>
-    </head>
-    <body>
-        welcome to {{ room.name }}
-        <div id="video-container"></div>
-        <pre id="status"></pre>
-    </body>
+  <head>
+    <title>{{ room.name }} - syncedview - pykitten</title>
+    <script type="roomdata">
+    {{ room_dict | tojson }}
+    </script>
+    <script type="module" src="../main.js"></script>
+    <link rel="stylesheet" href="../viewer.css" />
+  </head>
+
+  <body>
+    <h1>{{ room.name }}</h1>
+    <div id="video-container"><button id="activate">Activate</button></div>
+    <form id="switch-video-form" action="">
+      <p>Switch video</p>
+      <label for="videoId">Video id</label>
+      <input type="text" name="videoId" /><br />
+      <select name="quality">
+        <option value="2160">2160p (4K)</option>
+        <option value="1440">1440p (2K)</option>
+        <option value="1080" selected>1080p (FHD)</option>
+        <option value="720">720p (HD)</option>
+        <option value="480">480p</option>
+        <option value="360" selected>360p</option>
+        <option value="240">240p</option>
+        <option value="144">144p</option>
+      </select><br />
+      <input type="submit" value="Change" />
+    </form>
+  </body>
 </html>
