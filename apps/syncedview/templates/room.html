@@ -3,7 +3,9 @@
   <head>
     <title>{{ room.name }} - syncedview - pykitten</title>
     <script type="roomdata">
-    {{ room_dict | tojson }}
+            {{ room_dict | tojson }}
+    
+    
     </script>
     <script type="module" src="../main.js"></script>
     <link rel="stylesheet" href="../viewer.css" />
@@ -12,8 +14,8 @@
   <body>
     <h1>{{ room.name }}</h1>
     <div id="video-container"><button id="activate">Activate</button></div>
-    <form id="switch-video-form" action="">
-      <p>Switch video</p>
+    <form id="switch-video-yt-form" action="">
+      <p>Switch to a youtube video</p>
       <label for="videoId">Video id</label>
       <input type="text" name="videoId" /><br />
       <select name="quality">

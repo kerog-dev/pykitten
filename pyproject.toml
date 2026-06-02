@@ -3,6 +3,7 @@ name = "pykitten"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "httpx>=0.28.1",
     "jinja2>=3.1.6",
     "starlette>=1.2.0",
     "uvicorn[standard]>=0.48.0",

@@ -2,16 +2,20 @@ const roomData = JSON.parse(
   document.querySelector("script[type=\"roomdata\"]").textContent.trim(),
 );
 const videoContainer = document.querySelector("#video-container");
-const switchVideoForm = document.querySelector("#switch-video-form");
+const switchVideoYtForm = document.querySelector("#switch-video-yt-form");
 let hasInteracted = false;
 
-async function getVideoPath(roomName) {
+async function getVideoPath(roomName, attemptNum = 0) {
   try {
-    return await (await fetch(`../room_video_path?name=${encodeURIComponent(roomName)}`)).json();
+    return (await (await fetch(`../room_video_path?name=${encodeURIComponent(roomName)}`)).json()).path;
   } catch (e) {
+    if (attemptNum >= 50) {
+      alert("giving up auto re-load!");
+      return "about:blank";
+    }
     return new Promise(res => {
       setTimeout(() => {
-        getVideoPath(roomName).then(res);
+        getVideoPath(roomName, attemptNum + 1).then(res);
       }, 1_000);
     });
   }
@@ -19,11 +23,7 @@ async function getVideoPath(roomName) {
 
 async function createVideo(roomName) {
   const video = document.createElement("video");
-  video.src = (
-    await (
-      await fetch("../room_video_path?name=" + encodeURIComponent(roomName))
-    ).json()
-  ).path;
+  video.src = await getVideoPath(roomName);
   video.controls = true;
   video.width = window.innerWidth;
   video.addEventListener("error", () => {
@@ -99,7 +99,7 @@ ws.addEventListener("message", async (e) => {
   }
 });
 
-switchVideoForm.addEventListener("submit", (e) => {
+switchVideoYtForm.addEventListener("submit", (e) => {
   e.preventDefault();
-  ws.send(`switchvideo ${e.target.elements.videoId.value} ${e.target.elements.quality.value}`);
+  ws.send(`switchvideoyt ${e.target.elements.videoId.value} ${e.target.elements.quality.value}`);
 });
