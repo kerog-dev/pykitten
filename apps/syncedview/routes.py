@@ -1,10 +1,11 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from time import time
+import time
 from typing import Dict, List, Literal
 import json
 import re
+import threading
 
 import httpx
 from starlette.requests import Request
@@ -23,6 +24,7 @@ class YoutubeWatching:
 @dataclass
 class RawURIWatching:
     uri: str
+    file_name: str
     type: Literal["rawuri"] = "rawuri"
 
 
@@ -48,7 +50,7 @@ class TimeState:
     def time(self) -> float:
         if self.paused:
             return self.base_time
-        time_passed = time() - self.started_at
+        time_passed = time.time() - self.started_at
         return self.base_time + time_passed
 
 
@@ -79,13 +81,37 @@ def start_yt_download(video_dir: Path, video_id: str, quality: str):
         asyncio.create_task(task())
 
 
+def start_rawuri_download(video_dir: Path, uri: str):
+    file_name = uri.encode().hex()
+
+    async def task():
+        file = open(video_dir / (file_name + ".tmp"), "wb")
+        async with httpx_client.stream("GET", uri) as res:
+            async for chunk in res.aiter_raw():
+                file.write(chunk)
+        file.close()
+        (video_dir / (file_name + ".tmp")).move(video_dir / file_name)
+
+    def is_already_downloaded():
+        for file in video_dir.iterdir():
+            if file.name == file_name:
+                return True
+        return False
+
+    if not is_already_downloaded():
+        asyncio.create_task(task())
+
+    return file_name
+
+
 def room_watching_to_dict(watching: RoomWatching) -> dict:
     dict = {"type": watching.type}
     match watching:
         case YoutubeWatching(id=id):
             dict["videoId"] = id
-        case RawURIWatching(uri=uri):
+        case RawURIWatching(uri=uri, file_name=file_name):
             dict["uri"] = uri
+            dict["filename"] = file_name
     return dict
 
 
@@ -111,8 +137,41 @@ async def describe_watching(watching: RoomWatching) -> str:
         case RawURIWatching(uri=uri):
             return f"raw uri -- {uri}"
 
+files_last_accessed: dict[str, float] = {}
+
+class TrackedStaticFiles:
+    def __init__(self, directory: Path):
+        self._static = StaticFiles(directory=directory)
+        self._directory = directory
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            rel = scope.get("path", "").lstrip("/")
+            fp = self._directory / rel
+            if fp.is_file():
+                files_last_accessed[str(fp)] = time.time()
+        await self._static(scope, receive, send)
+
+def cache_cleanup_thread(cache_dirs: list[Path]):
+    while True:
+        now = time.time()
+        for dir in cache_dirs:
+            for entry in dir.iterdir():
+                if not entry.is_file():
+                    continue
+                access_time = files_last_accessed.get(str(entry), entry.stat().st_mtime)
+                if now - access_time > 20 * 60:
+                    entry.unlink(missing_ok=True)
+                    files_last_accessed.pop(str(entry), None)
+        time.sleep(5 * 60)
+        
 
 def start(render, data_dir: Path):
+    (data_dir / "yt").mkdir(exist_ok=True)
+    (data_dir / "rawuri").mkdir(exist_ok=True)
+
+    threading.Thread(target=cache_cleanup_thread, args=([data_dir / "yt", data_dir / "rawuri"],), daemon = True).start()
+
     async def get_room(req: Request):
         room_name = req.path_params.get("name")
         room = None
@@ -127,7 +186,7 @@ def start(render, data_dir: Path):
         }
         return render("room.html", room=room, room_dict=room_dict)
 
-    async def list_rooms():
+    async def list_rooms(req: Request):
         html = ""
         for room in rooms:
             html = (
@@ -152,7 +211,7 @@ def start(render, data_dir: Path):
         room = Room(
             name=room_name,
             watching=YoutubeWatching(id=video_id),
-            time=TimeState(base_time=0, paused=True, started_at=time()),
+            time=TimeState(base_time=0, paused=True, started_at=time.time()),
         )
         rooms.append(room)
         return JSONResponse({"ok": True})
@@ -166,10 +225,12 @@ def start(render, data_dir: Path):
                 status_code=400,
             )
 
+        file_name = start_rawuri_download(data_dir / "rawuri", uri)
+
         room = Room(
             name=room_name,
-            watching=RawURIWatching(uri=uri),
-            time=TimeState(base_time=0, paused=True, started_at=time()),
+            watching=RawURIWatching(uri=uri, file_name=file_name),
+            time=TimeState(base_time=0, paused=True, started_at=time.time()),
         )
         rooms.append(room)
         return JSONResponse({"ok": True})
@@ -186,14 +247,24 @@ def start(render, data_dir: Path):
             return JSONResponse({"ok": False, "err": f"no room with name {room_name}"})
         match room.watching:
             case YoutubeWatching(id=id):
-                for file in data_dir.iterdir():
+                for file in (data_dir / "yt").iterdir():
                     if file.name.startswith(id):
                         return JSONResponse(
                             {"ok": True, "path": f"/syncedview/static_yt/{file.name}"}
                         )
                 return JSONResponse({"ok": False, "err": "no file for this youtube id"})
-            case RawURIWatching(uri=uri):
-                return JSONResponse({"ok": True, "path": uri})
+            case RawURIWatching(file_name=file_name):
+                for file in (data_dir / "rawuri").iterdir():
+                    print(f"{file.name} {file_name}")
+                    if file.name.startswith(file_name):
+                        print(f"found! {file.name}")
+                        return JSONResponse(
+                            {
+                                "ok": True,
+                                "path": f"/syncedview/static_rawuri/{file.name}",
+                            }
+                        )
+                return JSONResponse({"ok": False, "err": "no file for this rawuri"})
 
     async def room_ws(ws: WebSocket):
         room_name = ws.path_params.get("name")
@@ -230,12 +301,12 @@ def start(render, data_dir: Path):
                 if parts[0] == "stateupdate":
                     room.time.base_time = float(parts[1])
                     room.time.paused = parts[2] == "1"
-                    room.time.started_at = time()
+                    room.time.started_at = time.time()
                 elif parts[0] == "switchvideoyt":
                     room.watching = YoutubeWatching(id=parts[1])
                     room.time.base_time = 0
                     room.time.paused = True
-                    room.time.started_at = time()
+                    room.time.started_at = time.time()
                     start_yt_download(data_dir / "yt", room.watching.id, parts[2])
                 for update_ws in room_ws:
                     if update_ws is ws and parts[0] == "stateupdate":
@@ -253,8 +324,11 @@ def start(render, data_dir: Path):
         Route("/rooms/{name}", get_room),
         Route("/room_video_path", get_room_video_path),
         WebSocketRoute("/ws/{name}", room_ws),
+        Mount("/static_yt", StaticFiles(directory=data_dir / "yt"), name="yt_static"),
         Mount(
-            "/static_yt", StaticFiles(directory=str(data_dir / "yt")), name="yt_static"
+            "/static_rawuri",
+            StaticFiles(directory=data_dir / "rawuri"),
+            name="rawuri_static",
         ),
     ]
 

@@ -7,16 +7,18 @@ let hasInteracted = false;
 
 async function getVideoPath(roomName, attemptNum = 0) {
   try {
-    return (await (await fetch(`../room_video_path?name=${encodeURIComponent(roomName)}`)).json()).path;
+    const json = (await (await fetch(`../room_video_path?name=${encodeURIComponent(roomName)}`)).json());
+    if (!json.ok) throw 'not ok: ' + json.err
+    return json.path
   } catch (e) {
-    if (attemptNum >= 50) {
+    if (attemptNum >= 18) {
       alert("giving up auto re-load!");
       return "about:blank";
     }
     return new Promise(res => {
       setTimeout(() => {
         getVideoPath(roomName, attemptNum + 1).then(res);
-      }, 1_000);
+      }, 10_000);
     });
   }
 }
